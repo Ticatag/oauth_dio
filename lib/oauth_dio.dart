@@ -105,36 +105,23 @@ class OAuthMemoryStorage extends OAuthStorage {
 
 /// Token
 class OAuthToken {
-  OAuthToken({this.accessToken = '', this.refreshToken = '', this.expiration});
+  final String? accessToken;
+  final String? refreshToken;
+  final DateTime expiration;
 
-  final String accessToken;
-  final String refreshToken;
-  final DateTime? expiration;
+  bool get isExpired => DateTime.now().isAfter(expiration);
 
-  bool get isExpired =>
-      expiration == null ? false : DateTime.now().isAfter(expiration!);
-
-  factory OAuthToken.fromMap(Map<String, dynamic> map) {
-    return OAuthToken(
-      accessToken: map['access_token'],
-      refreshToken: map['refresh_token'],
-      expiration: DateTime.now().add(
-        Duration(
-          seconds: map['expires_in'] ?? map['expires'],
-        ),
-      ),
-    );
-  }
+  OAuthToken.fromMap(Map<String, dynamic> map)
+      : accessToken = map['access_token'],
+        refreshToken = map['refresh_token'],
+        expiration = DateTime.now()
+            .add(Duration(seconds: map['expires_in'] ?? map['expires']));
 
   Map<String, dynamic> toMap() => {
         'access_token': accessToken,
         'refresh_token': refreshToken,
-        'expires_in': expiration?.millisecondsSinceEpoch,
+        'expires_in': expiration.millisecondsSinceEpoch,
       };
-
-  String toString() {
-    return 'OAuthToken{\naccess_token:${this.accessToken},\nrefresh_token:${this.refreshToken},\nexpires_in:${this.expiration}';
-  }
 }
 
 /// Encode String To Base64
@@ -145,27 +132,32 @@ class OAuth {
   String tokenUrl;
   String clientId;
   String clientSecret;
-  Dio dio;
-  OAuthStorage storage;
-  OAuthTokenExtractor extractor;
-  OAuthTokenValidator validator;
+  Dio? dio;
+  OAuthStorage? storage;
+  OAuthTokenExtractor? extractor;
+  OAuthTokenValidator? validator;
 
-  OAuth({
-    required this.tokenUrl,
-    required this.clientId,
-    required this.clientSecret,
-    Dio? dio,
-    OAuthStorage? storage,
-    OAuthTokenExtractor? extractor,
-    OAuthTokenValidator? validator,
-  })  : this.dio = dio ?? Dio(),
-        this.storage = storage ?? OAuthMemoryStorage(),
-        this.extractor = extractor ?? ((res) => OAuthToken.fromMap(res.data)),
-        this.validator =
-            validator ?? ((token) => Future.value(!token.isExpired));
+  OAuth(
+      {required this.tokenUrl,
+      required this.clientId,
+      required this.clientSecret,
+      this.extractor,
+      this.dio,
+      this.storage,
+      this.validator}) {
+    dio = dio ?? Dio();
+    storage = storage ?? OAuthMemoryStorage();
+    extractor = extractor ?? (res) => OAuthToken.fromMap(res.data);
+    validator = validator ?? (token) => Future.value(!token.isExpired);
+  }
 
   Future<OAuthToken> requestTokenAndSave(OAuthGrantType grantType) async {
-    return requestToken(grantType).then((token) => storage.save(token));
+    return requestToken(grantType)
+        .then((token) => storage!.save(token))
+        .catchError((error) {
+      this.storage.clear();
+      return null;
+    });
   }
 
   /// Request a new Access Token using a strategy
@@ -179,8 +171,7 @@ class OAuth {
               "Basic ${stringToBase64.encode('$clientId:$clientSecret')}"
         }));
 
-    return this
-        .dio
+    return dio!
         .request(tokenUrl,
             data: request.data,
             options: Options(
@@ -188,25 +179,28 @@ class OAuth {
               headers: request.headers,
               method: request.method,
             ))
-        .then((res) => extractor(res));
+        .then((res) => extractor!(res))
+        .catchError((error) {
+      throw error;
+    });
   }
 
   /// return current access token or refresh
   Future<OAuthToken?> fetchOrRefreshAccessToken() async {
-    OAuthToken? token = await this.storage.fetch();
+    OAuthToken? token = await storage!.fetch();
 
     if (token == null) {
       return null;
     }
 
-    if (await this.validator(token)) return token;
+    if (await this.validator!(token)) return token;
 
     return this.refreshAccessToken();
   }
 
   /// Refresh Access Token
   Future<OAuthToken> refreshAccessToken() async {
-    OAuthToken? token = await this.storage.fetch();
+    OAuthToken? token = await storage?.fetch();
     String refreshToken = token?.refreshToken ?? '';
 
     return this
