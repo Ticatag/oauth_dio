@@ -155,7 +155,7 @@ class OAuth {
     return requestToken(grantType)
         .then((token) => storage!.save(token))
         .catchError((error) {
-      this.storage.clear();
+      this.storage?.clear();
       return null;
     });
   }
